@@ -3721,6 +3721,31 @@ def _default_spawn(
     # attributed correctly regardless of how the child loads config.
     env["HERMES_PROFILE"] = profile_arg
 
+    # ── Auto-inject API key for worker profiles missing model config ─────────
+    # Worker profiles (data-collector, bull-researcher, etc.) were created
+    # without a `model:` block in their config.yaml. When the worker spawns,
+    # it gets an empty API key and crashes immediately with
+    # "Provider resolver returned an empty API key". Fix: detect the missing
+    # config and inject CUSTOM_CUSTOM9A_API_KEY from the environment so the
+    # worker uses the same credentials as the main agent.
+    _api_key = os.environ.get("CUSTOM_CUSTOM9A_API_KEY", "")
+    if _api_key:
+        _profile_config_path = (
+            Path(os.environ.get("HERMES_HOME", str(Path.home() / ".hermes")))
+            / "profiles"
+            / profile_arg
+            / "config.yaml"
+        )
+        if _profile_config_path.exists():
+            _raw = _profile_config_path.read_text()
+            # Inject model: block if it's missing and api_key is empty in it
+            if 'model:\n  default:' not in _raw and "api_key: ''" in _raw:
+                _fixed = _raw.replace(
+                    "_config_version:",
+                    "model:\n  default: MiniMax-M2.7\n  provider: custom\n  base_url: https://api.nengpa.com/anthropic\n  api_key: ${CUSTOM_CUSTOM9A_API_KEY}\n_config_version:",
+                )
+                _profile_config_path.write_text(_fixed)
+
     cmd = [
         "hermes",
         "-p", profile_arg,
